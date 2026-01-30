@@ -9,7 +9,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest"
+    "test": "vitest",
+    "server": "cd server && npm start",
+    "server:start": "cd server && ./start.sh",
+    "server:stop": "cd server && ./stop.sh"
   },
   "dependencies": {
     "react": "^18.2.0",

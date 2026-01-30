@@ -38,6 +38,11 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 5173
+    port: 5173,
+    allowedHosts: [
+      'localhost',
+      'skipper-assistant-1968.tail5697f1.ts.net',
+      '.tail5697f1.ts.net'
+    ]
   }
 })
