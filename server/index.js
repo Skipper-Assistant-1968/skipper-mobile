@@ -15,9 +15,14 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
 
 const app = express();
-const PORT = process.env.PORT || 3031;
+// Port 3032 because Tailscale serve proxies 3031 -> 3032
+const PORT = process.env.PORT || 3032;
+// WebSocket on 3034, Tailscale proxies 3033 -> 3034
+const WS_PORT = process.env.WS_PORT || 3034;
 
 // ===================
 // SECURITY MIDDLEWARE
@@ -40,6 +45,9 @@ app.use(helmet({
     includeSubDomains: true,
   },
 }));
+
+// Trust proxy (required for Tailscale serve acting as reverse proxy)
+app.set('trust proxy', 1);
 
 // Rate limiting - general API
 const apiLimiter = rateLimit({
@@ -76,6 +84,148 @@ const DIGESTS_DIR = path.join(__dirname, '../../digests');
 
 // Server start time for uptime tracking
 const SERVER_START = Date.now();
+
+// ===================
+// WEBSOCKET SERVER
+// ===================
+
+const wsServer = new WebSocket.Server({ port: WS_PORT });
+const wsClients = new Set();
+
+wsServer.on('connection', (ws) => {
+  console.log('🔌 WebSocket client connected');
+  wsClients.add(ws);
+  
+  // Send initial connection confirmation
+  ws.send(JSON.stringify({
+    type: 'connected',
+    timestamp: new Date().toISOString(),
+    message: 'Connected to Skipper WebSocket'
+  }));
+  
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      handleWsMessage(ws, message);
+    } catch (err) {
+      console.error('WebSocket parse error:', err.message);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('🔌 WebSocket client disconnected');
+    wsClients.delete(ws);
+  });
+  
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err.message);
+    wsClients.delete(ws);
+  });
+});
+
+// Handle incoming WebSocket messages
+function handleWsMessage(ws, message) {
+  const { type, payload } = message;
+  
+  switch (type) {
+    case 'chat:message':
+      // Client sends a message - same as POST /api/chat/send but via WS
+      handleWsChatMessage(ws, payload);
+      break;
+      
+    case 'chat:typing':
+      // Broadcast typing indicator to all other clients
+      broadcastToOthers(ws, { type: 'chat:typing', payload });
+      break;
+      
+    case 'ping':
+      ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+      break;
+      
+    default:
+      ws.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${type}` }));
+  }
+}
+
+// Handle chat message via WebSocket
+function handleWsChatMessage(ws, payload) {
+  const { content } = payload || {};
+  
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    ws.send(JSON.stringify({ 
+      type: 'error', 
+      message: 'Message content is required' 
+    }));
+    return;
+  }
+  
+  const timestamp = new Date().toISOString();
+  const userMessage = {
+    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    role: 'user',
+    content: content.trim(),
+    timestamp: timestamp,
+    status: 'sent'
+  };
+  
+  // Store the message
+  chatMessages.push(userMessage);
+  saveChatMessages();
+  
+  // Add to pending queue for Skipper
+  addToPending(userMessage);
+  
+  console.log(`💬 [WS] Chat message received: "${content.trim().substring(0, 50)}..."`);
+  
+  // Acknowledge to sender
+  ws.send(JSON.stringify({
+    type: 'chat:message:ack',
+    payload: userMessage
+  }));
+  
+  // Broadcast to all other clients (e.g., other devices)
+  broadcastToOthers(ws, {
+    type: 'chat:message',
+    payload: userMessage
+  });
+}
+
+// Broadcast message to all connected clients
+function broadcast(message) {
+  const data = JSON.stringify(message);
+  for (const client of wsClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  }
+}
+
+// Broadcast to all except sender
+function broadcastToOthers(sender, message) {
+  const data = JSON.stringify(message);
+  for (const client of wsClients) {
+    if (client !== sender && client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  }
+}
+
+// Broadcast Skipper's response to all clients
+function broadcastResponse(responseMessage) {
+  broadcast({
+    type: 'chat:response',
+    payload: responseMessage
+  });
+}
+
+// Broadcast status update to all clients
+function broadcastStatusUpdate(status) {
+  broadcast({
+    type: 'status:update',
+    payload: status
+  });
+}
 
 // In-memory chat messages (persisted to disk)
 let chatMessages = [];
@@ -163,8 +313,10 @@ app.use(cors({
       return callback(null, true);
     }
     
-    // Check Tailscale domain (exact match only, not wildcard)
-    if (origin === `https://${TAILSCALE_DOMAIN}` || origin === `http://${TAILSCALE_DOMAIN}`) {
+    // Check Tailscale domain (with or without port)
+    // Matches: https://domain, https://domain:5173, https://domain:3031, etc.
+    const tailscalePattern = new RegExp(`^https?://${TAILSCALE_DOMAIN.replace(/\./g, '\\.')}(:\\d+)?$`);
+    if (tailscalePattern.test(origin)) {
       return callback(null, true);
     }
     
@@ -262,38 +414,144 @@ app.get('/api/agents', (req, res) => {
     completedAgents: []
   });
 
+  // Get recent sessions to correlate with agents
+  const recentSessions = getRecentSessions(20);
+
   // Transform agents array into richer format
-  const activeAgents = (status.agents || []).map((agent, index) => ({
-    id: agent.label || `agent-${index}`,
-    label: agent.label || `Agent ${index + 1}`,
-    name: formatAgentName(agent.label),
-    task: agent.task || 'Working...',
-    model: agent.model || 'unknown',
-    status: 'active',
-    startedAt: agent.startedAt || status.lastUpdate || new Date().toISOString(),
-    progress: agent.progress || null // Could be 0-100 or null for indeterminate
-  }));
+  const activeAgents = (status.agents || []).map((agent, index) => {
+    // Try to find a matching session
+    const matchedSession = findSessionForAgent(agent, recentSessions);
+    return {
+      id: agent.label || `agent-${index}`,
+      label: agent.label || `Agent ${index + 1}`,
+      name: formatAgentName(agent.label),
+      task: agent.task || 'Working...',
+      model: agent.model || 'unknown',
+      status: 'active',
+      startedAt: agent.startedAt || status.lastUpdate || new Date().toISOString(),
+      progress: agent.progress || null, // Could be 0-100 or null for indeterminate
+      sessionId: agent.sessionId || (matchedSession ? matchedSession.id : null)
+    };
+  });
 
   // Include recently completed agents if tracked
-  const completedAgents = (status.completedAgents || []).map((agent, index) => ({
-    id: agent.label || `completed-${index}`,
-    label: agent.label || `Completed ${index + 1}`,
-    name: formatAgentName(agent.label),
-    task: agent.task || 'Task completed',
-    model: agent.model || 'unknown',
-    status: agent.status || 'completed',
-    completedAt: agent.completedAt || null,
-    result: agent.result || null
-  }));
+  const completedAgents = (status.completedAgents || []).map((agent, index) => {
+    const matchedSession = findSessionForAgent(agent, recentSessions);
+    return {
+      id: agent.label || `completed-${index}`,
+      label: agent.label || `Completed ${index + 1}`,
+      name: formatAgentName(agent.label),
+      task: agent.task || 'Task completed',
+      model: agent.model || 'unknown',
+      status: agent.status || 'completed',
+      completedAt: agent.completedAt || null,
+      result: agent.result || null,
+      sessionId: agent.sessionId || (matchedSession ? matchedSession.id : null)
+    };
+  });
 
   res.json({
     active: activeAgents,
     completed: completedAgents.slice(0, 10), // Last 10 completed
     totalActive: activeAgents.length,
     totalCompleted: completedAgents.length,
-    lastUpdate: status.lastUpdate || null
+    lastUpdate: status.lastUpdate || null,
+    recentSessions: recentSessions.slice(0, 5) // Include recent sessions for discovery
   });
 });
+
+/**
+ * Get recent sessions from the sessions directory
+ */
+function getRecentSessions(limit = 10) {
+  const sessionsDir = path.join(process.env.HOME, '.clawdbot/agents/main/sessions');
+  try {
+    if (!fs.existsSync(sessionsDir)) return [];
+    
+    const files = fs.readdirSync(sessionsDir)
+      .filter(f => f.endsWith('.jsonl') && !f.includes('.deleted'))
+      .map(f => {
+        const filePath = path.join(sessionsDir, f);
+        const stats = fs.statSync(filePath);
+        return {
+          filename: f,
+          id: f.replace('.jsonl', ''),
+          mtime: stats.mtime
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, limit);
+    
+    // Extract basic info from each session
+    return files.map(file => {
+      try {
+        const content = fs.readFileSync(path.join(sessionsDir, file.filename), 'utf-8');
+        const firstLines = content.split('\n').slice(0, 10);
+        let task = null;
+        let timestamp = null;
+        
+        for (const line of firstLines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === 'session') {
+              timestamp = entry.timestamp;
+            }
+            if (entry.type === 'message' && entry.message?.role === 'user') {
+              // Extract first 200 chars of task
+              const text = entry.message.content?.[0]?.text || entry.message.content;
+              task = typeof text === 'string' ? text.substring(0, 200) : null;
+              break;
+            }
+          } catch (e) { continue; }
+        }
+        
+        return {
+          id: file.id,
+          timestamp: timestamp || file.mtime.toISOString(),
+          task: task,
+          mtime: file.mtime.toISOString()
+        };
+      } catch (e) {
+        return { id: file.id, timestamp: file.mtime.toISOString(), task: null };
+      }
+    });
+  } catch (e) {
+    console.error('Error reading sessions:', e.message);
+    return [];
+  }
+}
+
+/**
+ * Try to match an agent with a session based on task similarity
+ */
+function findSessionForAgent(agent, sessions) {
+  if (!agent.task || !sessions.length) return null;
+  
+  const agentTaskLower = agent.task.toLowerCase();
+  const agentWords = agentTaskLower.split(/\s+/).filter(w => w.length > 3);
+  
+  // Find session with best matching task
+  let bestMatch = null;
+  let bestScore = 0;
+  
+  for (const session of sessions) {
+    if (!session.task) continue;
+    const sessionTaskLower = session.task.toLowerCase();
+    
+    // Count matching words
+    let score = 0;
+    for (const word of agentWords) {
+      if (sessionTaskLower.includes(word)) score++;
+    }
+    
+    if (score > bestScore && score >= 2) {
+      bestScore = score;
+      bestMatch = session;
+    }
+  }
+  
+  return bestMatch;
+}
 
 // Helper: Format agent label into readable name
 function formatAgentName(label) {
@@ -663,6 +921,9 @@ app.post('/api/chat/respond', (req, res) => {
   }
 
   console.log(`🤖 Skipper response sent: "${message.trim().substring(0, 50)}${message.length > 50 ? '...' : ''}"`);
+
+  // Broadcast response via WebSocket to all connected clients
+  broadcastResponse(assistantMessage);
 
   res.json({
     success: true,
@@ -1035,6 +1296,168 @@ app.get('/api/digests/youtube/:date', (req, res) => {
 });
 
 // ===================
+// SESSIONS ENDPOINTS
+// ===================
+
+/**
+ * GET /api/sessions
+ * Returns list of recent sessions with basic metadata
+ */
+app.get('/api/sessions', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+  const sessions = getRecentSessions(limit);
+  
+  res.json({
+    sessions,
+    count: sessions.length
+  });
+});
+
+// ===================
+// AGENT TRANSCRIPT ENDPOINT
+// ===================
+
+/**
+ * GET /api/agents/:sessionKey/transcript
+ * Returns transcript messages for a specific agent session
+ * sessionKey format: "agent:main:subagent:uuid" - we extract the uuid part
+ */
+app.get('/api/agents/:sessionKey/transcript', (req, res) => {
+  const { sessionKey } = req.params;
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+  
+  // Extract session ID (UUID) from session key
+  // Format: "agent:main:subagent:uuid" or just "uuid"
+  const parts = sessionKey.split(':');
+  const sessionId = parts.length > 1 ? parts[parts.length - 1] : sessionKey;
+  
+  // Validate session ID format (UUID)
+  if (!/^[a-f0-9-]{36}$/i.test(sessionId)) {
+    return res.status(400).json({
+      error: 'Invalid session ID',
+      message: 'Session ID must be a valid UUID'
+    });
+  }
+  
+  // Build path to session file
+  const sessionsDir = path.join(process.env.HOME, '.clawdbot/agents/main/sessions');
+  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+  
+  // Security: Ensure path is within sessions directory
+  const resolvedPath = path.resolve(sessionFile);
+  if (!resolvedPath.startsWith(path.resolve(sessionsDir))) {
+    return res.status(400).json({
+      error: 'Invalid path',
+      message: 'Invalid session ID'
+    });
+  }
+  
+  if (!fs.existsSync(sessionFile)) {
+    return res.status(404).json({
+      error: 'Session not found',
+      sessionKey,
+      sessionId,
+      message: `No transcript found for session ${sessionId}`
+    });
+  }
+  
+  try {
+    const content = fs.readFileSync(sessionFile, 'utf-8');
+    const lines = content.trim().split('\n');
+    
+    // Parse JSONL and extract relevant entries
+    const entries = [];
+    let sessionInfo = null;
+    
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        
+        // Capture session metadata
+        if (entry.type === 'session') {
+          sessionInfo = {
+            id: entry.id,
+            timestamp: entry.timestamp,
+            cwd: entry.cwd
+          };
+          continue;
+        }
+        
+        // Skip non-message entries (model changes, etc)
+        if (entry.type !== 'message') continue;
+        
+        const msg = entry.message;
+        if (!msg) continue;
+        
+        // Parse message content
+        const parsed = {
+          id: entry.id,
+          timestamp: entry.timestamp,
+          role: msg.role,
+          model: msg.model,
+          thinking: [],
+          text: [],
+          toolCalls: [],
+          toolResults: []
+        };
+        
+        // Parse content array
+        if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === 'thinking') {
+              parsed.thinking.push(block.thinking);
+            } else if (block.type === 'text') {
+              parsed.text.push(block.text);
+            } else if (block.type === 'toolCall' || block.type === 'tool_use') {
+              parsed.toolCalls.push({
+                id: block.id,
+                name: block.name,
+                arguments: block.arguments || block.input
+              });
+            } else if (block.type === 'tool_result') {
+              parsed.toolResults.push({
+                toolUseId: block.tool_use_id,
+                content: block.content
+              });
+            }
+          }
+        } else if (typeof msg.content === 'string') {
+          parsed.text.push(msg.content);
+        }
+        
+        // Only include entries with actual content
+        if (parsed.thinking.length > 0 || parsed.text.length > 0 || 
+            parsed.toolCalls.length > 0 || parsed.toolResults.length > 0) {
+          entries.push(parsed);
+        }
+      } catch (parseErr) {
+        // Skip malformed lines
+        continue;
+      }
+    }
+    
+    // Return last N entries
+    const recentEntries = entries.slice(-limit);
+    
+    res.json({
+      sessionKey,
+      sessionId,
+      sessionInfo,
+      entries: recentEntries,
+      totalEntries: entries.length,
+      returned: recentEntries.length,
+      hasMore: entries.length > limit
+    });
+  } catch (error) {
+    console.error(`Error reading transcript ${sessionId}:`, error.message);
+    res.status(500).json({
+      error: 'Failed to read transcript',
+      message: error.message
+    });
+  }
+});
+
+// ===================
 // ERROR HANDLING
 // ===================
 
@@ -1073,8 +1496,9 @@ app.use((err, req, res, next) => {
 // START SERVER
 // ===================
 
-app.listen(PORT, '127.0.0.1', () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Skipper Mobile API running at http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket server running at ws://localhost:${WS_PORT}`);
   console.log(`📡 Endpoints:`);
   console.log(`   GET  /api/heartbeat       - Alive status, state, agent count`);
   console.log(`   GET  /api/status          - Current focus, agents, recent tasks`);
@@ -1087,6 +1511,11 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`   GET  /api/chat/pending    - Pending messages for Skipper`);
   console.log(`   DELETE /api/chat/pending  - Clear pending messages`);
   console.log(`   POST /api/chat/respond    - Skipper sends response`);
+  console.log(`📡 WebSocket Events:`);
+  console.log(`   chat:message    - Client sends message`);
+  console.log(`   chat:response   - Skipper sends response`);
+  console.log(`   chat:typing     - Typing indicator`);
+  console.log(`   status:update   - Status changes`);
 });
 
-module.exports = app;
+module.exports = { app, broadcast, broadcastResponse, broadcastStatusUpdate };

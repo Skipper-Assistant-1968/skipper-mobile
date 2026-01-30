@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { Sun, Moon } from 'lucide-react'
+import { useTheme } from '../context/ThemeContext'
 
 interface HeartbeatStatus {
   connected: boolean
@@ -8,6 +10,7 @@ interface HeartbeatStatus {
 }
 
 export function StatusBar() {
+  const { toggleTheme, isDark } = useTheme()
   const [status, setStatus] = useState<HeartbeatStatus>({
     connected: false,
     lastPing: null,
@@ -62,22 +65,41 @@ export function StatusBar() {
         <div className="flex items-center justify-between px-4 h-12">
           <div className="flex items-center gap-3">
             <span className="text-xl">⚓</span>
-            <span className="font-semibold text-white">Skipper</span>
+            <span className="font-semibold text-white dark:text-white light:text-slate-900">Skipper</span>
           </div>
           
-          <div className="flex items-center gap-2">
-            <motion.div
-              className={`w-2 h-2 rounded-full ${statusColor}`}
-              animate={{ 
-                scale: status.connected ? [1, 1.2, 1] : 1,
-                opacity: status.connected ? 1 : 0.5 
+          <div className="flex items-center gap-3">
+            {/* Theme toggle */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleTheme()
               }}
-              transition={{ 
-                repeat: status.connected ? Infinity : 0, 
-                duration: 2 
-              }}
-            />
-            <span className="text-xs text-slate-400">{statusText}</span>
+              className="p-2 rounded-full hover:bg-slate-700 dark:hover:bg-slate-700 light:hover:bg-slate-200 transition-colors"
+              aria-label="Toggle theme"
+            >
+              {isDark ? (
+                <Sun className="w-4 h-4 text-yellow-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-600" />
+              )}
+            </button>
+            
+            {/* Connection status */}
+            <div className="flex items-center gap-2">
+              <motion.div
+                className={`w-2 h-2 rounded-full ${statusColor}`}
+                animate={{ 
+                  scale: status.connected ? [1, 1.2, 1] : 1,
+                  opacity: status.connected ? 1 : 0.5 
+                }}
+                transition={{ 
+                  repeat: status.connected ? Infinity : 0, 
+                  duration: 2 
+                }}
+              />
+              <span className="text-xs text-slate-400">{statusText}</span>
+            </div>
           </div>
         </div>
         

@@ -1,13 +1,39 @@
 // API client for Skipper Gateway and Mobile API
 
-// @ts-ignore - Vite env types
-const KANBAN_URL = (import.meta as any).env?.VITE_KANBAN_URL || 'http://localhost:3030'
-// @ts-ignore - Vite env types
-const MOBILE_API_URL = (import.meta as any).env?.VITE_MOBILE_API_URL || 'http://localhost:3031'
+// Dynamically determine API URLs based on current host
+// If accessed via Tailscale, use Tailscale URLs; otherwise use localhost
+const getBaseUrl = (port: number): string => {
+  if (typeof window === 'undefined') return `http://localhost:${port}`
+  
+  const host = window.location.hostname
+  const protocol = window.location.protocol
+  
+  // If accessing via Tailscale domain, use same domain with different port
+  if (host.includes('.ts.net')) {
+    return `${protocol}//${host.split(':')[0]}:${port}`
+  }
+  
+  // Local development
+  return `http://localhost:${port}`
+}
+
+const KANBAN_URL = getBaseUrl(3030)
+const MOBILE_API_URL = getBaseUrl(3031)
 
 export interface ApiError {
   status: number
   message: string
+}
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  column: string
+  category?: string
+  createdAt: string
+  updatedAt: string
+  priority?: 'low' | 'medium' | 'high'
 }
 
 export interface ChatMessage {
@@ -68,8 +94,28 @@ class SkipperApi {
     return this.request(this.kanbanUrl, '/health')
   }
 
-  async getTasks(): Promise<any[]> {
+  async getTasks(): Promise<Task[]> {
     return this.request(this.kanbanUrl, '/api/tasks')
+  }
+
+  async createTask(task: Partial<Task>): Promise<Task> {
+    return this.request(this.kanbanUrl, '/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify(task),
+    })
+  }
+
+  async updateTask(id: string, updates: Partial<Task>): Promise<Task> {
+    return this.request(this.kanbanUrl, `/api/tasks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+  }
+
+  async deleteTask(id: string): Promise<void> {
+    return this.request(this.kanbanUrl, `/api/tasks/${id}`, {
+      method: 'DELETE',
+    })
   }
 
   // ================

@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { Mic, MicOff } from 'lucide-react'
 import { PageContainer } from '../components/PageContainer'
+import { QuickActions } from '../components/QuickActions'
 import { api, ChatMessage } from '../lib/api'
+
+// Types are declared in src/types/speech.d.ts
+import { useWebSocket } from '../hooks/useWebSocket'
 
 export function ChatPage() {
   const [message, setMessage] = useState('')
@@ -8,8 +13,112 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  
+  // Setup speech recognition
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition()
+      recognition.continuous = false
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        const transcript = Array.from(event.results)
+          .map((result: SpeechRecognitionResult) => result[0].transcript)
+          .join('')
+        setMessage(transcript)
+      }
+
+      recognition.onend = () => {
+        setIsListening(false)
+      }
+
+      recognition.onerror = () => {
+        setIsListening(false)
+      }
+
+      recognitionRef.current = recognition
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort()
+      }
+    }
+  }, [])
+
+  const toggleVoiceInput = () => {
+    if (!recognitionRef.current) {
+      setError('Voice input not supported in this browser')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop()
+      setIsListening(false)
+    } else {
+      setIsListening(true)
+      recognitionRef.current.start()
+    }
+  }
+  const pendingMessageRef = useRef<string | null>(null)
+
+  // Handle incoming messages via WebSocket
+  const handleWsMessage = useCallback((msg: ChatMessage) => {
+    setMessages(prev => {
+      // Check if this is an acknowledgment of a message we sent
+      const pendingId = pendingMessageRef.current
+      if (pendingId && msg.role === 'user') {
+        // Replace optimistic message with real one
+        const updated = prev.map(m => 
+          m.id === pendingId ? { ...msg, status: 'sent' as const } : m
+        )
+        pendingMessageRef.current = null
+        return updated
+      }
+      
+      // Check for duplicate
+      if (prev.some(m => m.id === msg.id)) {
+        return prev
+      }
+      
+      return [...prev, msg]
+    })
+  }, [])
+
+  // Handle Skipper's response via WebSocket
+  const handleWsResponse = useCallback((msg: ChatMessage) => {
+    setMessages(prev => {
+      // Check for duplicate
+      if (prev.some(m => m.id === msg.id)) {
+        return prev
+      }
+      return [...prev, msg]
+    })
+  }, [])
+
+  // WebSocket connection
+  const { 
+    isConnected, 
+    status: wsStatus, 
+    sendMessage: wsSendMessage,
+    lastError: wsError 
+  } = useWebSocket({
+    onMessage: handleWsMessage,
+    onResponse: handleWsResponse,
+    onConnect: () => {
+      console.log('WebSocket connected - real-time chat enabled')
+      setError(null)
+    },
+    onDisconnect: () => {
+      console.log('WebSocket disconnected - falling back to polling')
+    }
+  })
 
   // Scroll to bottom of messages
   const scrollToBottom = useCallback(() => {
@@ -26,13 +135,18 @@ export function ChatPage() {
     scrollToBottom()
   }, [messages, scrollToBottom])
 
-  // Poll for new messages every 5 seconds
+  // Poll for new messages only when WebSocket is disconnected
   useEffect(() => {
+    if (isConnected) {
+      // WebSocket is active, no need to poll
+      return
+    }
+
     const interval = setInterval(() => {
       pollForNewMessages()
     }, 5000)
     return () => clearInterval(interval)
-  }, [messages])
+  }, [messages, isConnected])
 
   async function loadChatHistory() {
     setIsLoading(true)
@@ -70,8 +184,9 @@ export function ChatPage() {
     if (!trimmedMessage || isSending) return
 
     // Optimistic update - add message immediately
+    const optimisticId = `temp_${Date.now()}`
     const optimisticMessage: ChatMessage = {
-      id: `temp_${Date.now()}`,
+      id: optimisticId,
       role: 'user',
       content: trimmedMessage,
       timestamp: new Date().toISOString(),
@@ -82,25 +197,48 @@ export function ChatPage() {
     setMessage('')
     setIsSending(true)
     setError(null)
+    pendingMessageRef.current = optimisticId
 
+    // Try WebSocket first, fall back to REST API
+    if (isConnected && wsSendMessage(trimmedMessage)) {
+      // Message sent via WebSocket - wait for acknowledgment
+      console.log('📤 Message sent via WebSocket')
+      
+      // Set a timeout to fall back to REST if no ack received
+      setTimeout(() => {
+        if (pendingMessageRef.current === optimisticId) {
+          console.log('No WebSocket ack, falling back to REST')
+          sendViaRest(trimmedMessage, optimisticId)
+        }
+      }, 3000)
+      
+      setIsSending(false)
+      inputRef.current?.focus()
+    } else {
+      // WebSocket not available, use REST API
+      console.log('📤 Sending via REST API (WebSocket unavailable)')
+      await sendViaRest(trimmedMessage, optimisticId)
+    }
+  }
+
+  async function sendViaRest(content: string, optimisticId: string) {
     try {
-      const response = await api.sendMessage(trimmedMessage)
+      const response = await api.sendMessage(content)
       
       // Replace optimistic message with real one
       setMessages(prev => prev.map(m => 
-        m.id === optimisticMessage.id 
+        m.id === optimisticId 
           ? { ...response.message, status: 'sent' as const }
           : m
       ))
-
-      // Focus input for next message
+      pendingMessageRef.current = null
       inputRef.current?.focus()
     } catch (err: any) {
       console.error('Failed to send message:', err)
       
       // Mark optimistic message as failed
       setMessages(prev => prev.map(m =>
-        m.id === optimisticMessage.id
+        m.id === optimisticId
           ? { ...m, status: 'error' as const }
           : m
       ))
@@ -116,12 +254,37 @@ export function ChatPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
-  // Could be used for message timestamps in future
-  // function formatRelativeTime(timestamp: string) { ... }
+  // Connection status indicator
+  function getConnectionStatus() {
+    if (isConnected) {
+      return { icon: '🟢', text: 'Live' }
+    }
+    if (wsStatus === 'connecting') {
+      return { icon: '🟡', text: 'Connecting...' }
+    }
+    return { icon: '🔴', text: 'Polling' }
+  }
+
+  const connStatus = getConnectionStatus()
 
   return (
     <PageContainer>
       <div className="flex flex-col h-[calc(100vh-8rem)]">
+        {/* Connection status indicator */}
+        <div className="flex justify-end items-center px-2 py-1 text-xs text-slate-500">
+          <span className="flex items-center gap-1">
+            <span>{connStatus.icon}</span>
+            <span>{connStatus.text}</span>
+          </span>
+        </div>
+
+        {/* Quick Actions Panel - show when no messages */}
+        {messages.length === 0 && !isLoading && (
+          <div className="mb-3">
+            <QuickActions onActionSent={() => setTimeout(pollForNewMessages, 1000)} />
+          </div>
+        )}
+
         {/* Chat messages area */}
         <div className="flex-1 overflow-y-auto space-y-4 pb-4 px-1">
           {isLoading ? (
@@ -178,27 +341,46 @@ export function ChatPage() {
         </div>
 
         {/* Error banner */}
-        {error && (
+        {(error || wsError) && (
           <div className="bg-red-900/50 border border-red-700 rounded-lg px-3 py-2 mb-2">
-            <p className="text-red-200 text-xs">{error}</p>
+            <p className="text-red-200 text-xs">{error || wsError}</p>
           </div>
         )}
         
         {/* Input area */}
         <div className="sticky bottom-20 bg-slate-900 pt-2">
           <form onSubmit={handleSendMessage} className="flex gap-2">
+            {/* Voice input button */}
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              className={`rounded-full w-12 h-12 flex items-center justify-center transition-colors flex-shrink-0 ${
+                isListening
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : 'bg-slate-700 hover:bg-slate-600 text-slate-400'
+              }`}
+            >
+              {isListening ? (
+                <MicOff className="w-5 h-5" />
+              ) : (
+                <Mic className="w-5 h-5" />
+              )}
+            </button>
+            
             <input
               ref={inputRef}
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Message Skipper..."
+              placeholder={isListening ? "Listening..." : "Message Skipper..."}
               disabled={isSending}
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-full px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-50"
+              className={`flex-1 bg-slate-800 border rounded-full px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-50 ${
+                isListening ? 'border-red-500' : 'border-slate-700'
+              }`}
             />
             <button 
               type="submit"
-              className={`rounded-full w-12 h-12 flex items-center justify-center transition-colors ${
+              className={`rounded-full w-12 h-12 flex items-center justify-center transition-colors flex-shrink-0 ${
                 message.trim() && !isSending
                   ? 'bg-blue-500 hover:bg-blue-600 text-white'
                   : 'bg-slate-700 text-slate-500 cursor-not-allowed'
@@ -212,6 +394,13 @@ export function ChatPage() {
               )}
             </button>
           </form>
+          
+          {/* Voice input hint */}
+          {isListening && (
+            <p className="text-center text-xs text-red-400 mt-2 animate-pulse">
+              🎤 Listening... tap mic to stop
+            </p>
+          )}
         </div>
       </div>
     </PageContainer>

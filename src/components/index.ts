@@ -1,3 +1,5 @@
 export { Navigation } from './Navigation'
 export { StatusBar } from './StatusBar'
 export { PageContainer } from './PageContainer'
+export { CreateTaskModal } from './CreateTaskModal'
+export { QuickActions } from './QuickActions'
