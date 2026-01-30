@@ -356,6 +356,99 @@ interface QuickAction {
 └─────────────────────────┘
 ```
 
+### 🔍 Work Transparency System
+
+**Primary Use Case**: "What is Skipper actually doing right now?"
+
+Discord shows "typing..." but that doesn't convey what's happening. This feature provides real visibility into Skipper's work.
+
+**Features**:
+- **Real-time status**: Current focus, active task description
+- **Agent visibility**: Number of sub-agents, what each is working on
+- **15-minute recaps**: Automatic progress summaries during active work
+- **Work log**: Chain-of-thought micro-memories for crash recovery
+
+**Data Models**:
+```typescript
+interface SkipperStatus {
+  currentFocus: string           // "Building mobile app project"
+  startedAt: Date
+  agents: AgentStatus[]          // Active sub-agents
+  recentTasks: string[]          // Last 3-5 completed items
+  lastUpdate: Date
+}
+
+interface WorkLogEntry {
+  timestamp: Date
+  task: string
+  completed: string[]            // What was done
+  inProgress: string[]           // What's being worked on
+  nextSteps: string[]            // What's planned
+  notes?: string                 // Chain-of-thought context
+}
+```
+
+**Backend Files**:
+```
+memory/status.json               # Current real-time status
+memory/work-log/YYYY-MM-DD.md    # Daily work log entries
+```
+
+**API Endpoints**:
+```
+GET  /api/status                 # Current status + active agents
+GET  /api/work-log               # Recent work log entries  
+GET  /api/work-log/:date         # Specific day's log
+WS   /api/status/stream          # Real-time status updates
+```
+
+**Wireframe (Text-based)**:
+```
+┌─────────────────────────┐
+│ 🔍 Status          LIVE │
+├─────────────────────────┤
+│ ⚓ Current Focus:       │
+│ "Setting up mobile app  │
+│  GitHub project"        │
+│ Started: 13:55          │
+│                         │
+│ 🤖 Active Agents (1)    │
+│ • Research: competitor  │
+│   analysis [60%]        │
+│                         │
+│ ✅ Recent:              │
+│ • Created 7 MVP issues  │
+│ • Set up PWA skeleton   │
+│                         │
+│ 📝 Last recap: 14:00    │
+│ [View Work Log]         │
+└─────────────────────────┘
+```
+
+**15-Minute Recap Example** (sent to Discord):
+```
+⚓ **Progress Update** (14:15)
+
+**Working on:** Skipper Mobile App setup
+
+**Done:**
+- Created GitHub repo with PWA skeleton
+- Added 8 issues for MVP tracking
+- Set up work transparency system
+
+**In Progress:**
+- Documenting status system in architecture
+
+**Next:**
+- Wait for Clark's feedback on priorities
+```
+
+**Benefits**:
+- Clark knows what's happening without asking
+- Crash recovery via work log
+- Accountability/audit trail
+- Better async collaboration
+
 ---
 
 ## 3. Implementation Plan
