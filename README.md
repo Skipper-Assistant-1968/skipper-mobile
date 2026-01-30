@@ -2,6 +2,12 @@
 
 A progressive web app (PWA) companion for Skipper AI assistant.
 
+## 🌐 Production Access
+
+**Live URL:** https://skipper-assistant-1968.tail5697f1.ts.net:5173
+
+*(Requires Tailscale connection)*
+
 ## Quick Start
 
 ```bash
@@ -18,6 +24,43 @@ npm run build
 npm run preview
 ```
 
+## 🚀 Production Deployment
+
+### Start Production Servers
+
+```bash
+# 1. Build the production bundle
+npm run build
+
+# 2. Start the backend API server (port 3031)
+cd server && npm start &
+
+# 3. Start the frontend preview server (port 4173)
+npm run preview -- --host 0.0.0.0 &
+
+# 4. Configure Tailscale (if not already done)
+tailscale serve --bg --https 5173 http://localhost:4173
+tailscale serve --bg --https 3031 http://localhost:3031
+```
+
+### Restart After Reboot
+
+```bash
+cd ~/clawd/skipper-mobile
+cd server && nohup npm start > server.log 2>&1 &
+cd .. && nohup npm run preview -- --host 0.0.0.0 > preview.log 2>&1 &
+```
+
+### Check Status
+
+```bash
+# Frontend
+curl -s http://localhost:4173/ | head -5
+
+# Backend API
+curl -s http://localhost:3031/api/heartbeat
+```
+
 ## Features
 
 - **Mobile-first design** - Optimized for phone screens with safe area support
@@ -25,6 +68,20 @@ npm run preview
 - **Dark theme** - Slate-900 background with Skipper branding
 - **Bottom navigation** - 5 tabs: Chat, Tasks, Digests, Agents, Activity
 - **Live status bar** - Shows gateway connection heartbeat
+
+## 📊 MVP Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| App Shell | ✅ Complete | Navigation, routing, layout |
+| Status Bar | ✅ Complete | Real-time heartbeat from gateway |
+| Chat Page | 🔲 Placeholder | Ready for chat implementation |
+| Tasks Page | 🔲 Placeholder | Ready for kanban integration |
+| Digests Page | 🔲 Placeholder | Ready for news feed |
+| Agents Page | 🔲 Placeholder | Ready for agent monitoring |
+| Activity Page | 🔲 Placeholder | Ready for work log display |
+| PWA Install | ✅ Complete | Icons, manifest, service worker |
+| Backend API | ✅ Complete | Heartbeat, status, work-log endpoints |
 
 ## Project Structure
 
