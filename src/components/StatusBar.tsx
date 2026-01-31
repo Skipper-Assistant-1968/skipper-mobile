@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, Settings } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 
 interface HeartbeatStatus {
@@ -10,6 +11,7 @@ interface HeartbeatStatus {
 }
 
 export function StatusBar() {
+  const navigate = useNavigate()
   const { toggleTheme, isDark } = useTheme()
   const [status, setStatus] = useState<HeartbeatStatus>({
     connected: false,
@@ -73,6 +75,20 @@ export function StatusBar() {
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Settings */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                navigate('/settings')
+              }}
+              className={`p-2 rounded-full transition-colors ${
+                isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-200'
+              }`}
+              aria-label="Settings"
+            >
+              <Settings className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
+            </button>
+
             {/* Theme toggle */}
             <button
               onClick={(e) => {

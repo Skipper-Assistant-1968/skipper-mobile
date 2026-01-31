@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { Navigation, StatusBar } from './components'
-import { ChatPage, TasksPage, DigestsPage, HotTopicsPage, AgentsPage, AgentDetailPage, ActivityPage } from './pages'
+import { ChatPage, TasksPage, DigestsPage, HotTopicsPage, AgentsPage, AgentDetailPage, ActivityPage, SettingsPage } from './pages'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
 
 function AppContent() {
@@ -23,6 +23,7 @@ function AppContent() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:sessionKey" element={<AgentDetailPage />} />
           <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
       
