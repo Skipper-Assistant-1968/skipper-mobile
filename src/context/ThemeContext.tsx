@@ -28,12 +28,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     
     // Update document class for Tailwind
     const root = document.documentElement
-    if (theme === 'dark') {
-      root.classList.add('dark')
-      root.classList.remove('light')
-    } else {
-      root.classList.add('light')
-      root.classList.remove('dark')
+    root.className = theme
+    
+    // Update meta theme-color for browser chrome
+    const metaThemeColor = document.getElementById('theme-color-meta')
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', theme === 'dark' ? '#0f172a' : '#f8fafc')
     }
   }, [theme])
 

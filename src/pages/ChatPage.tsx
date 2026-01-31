@@ -3,11 +3,13 @@ import { Mic, MicOff } from 'lucide-react'
 import { PageContainer } from '../components/PageContainer'
 import { QuickActions } from '../components/QuickActions'
 import { api, ChatMessage } from '../lib/api'
+import { useTheme } from '../context/ThemeContext'
 
 // Types are declared in src/types/speech.d.ts
 import { useWebSocket } from '../hooks/useWebSocket'
 
 export function ChatPage() {
+  const { isDark } = useTheme()
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -297,8 +299,8 @@ export function ChatPage() {
           ) : messages.length === 0 ? (
             <div className="text-center py-8">
               <span className="text-4xl mb-4 block">⚓</span>
-              <h2 className="text-xl font-semibold text-white mb-2">Welcome to Skipper</h2>
-              <p className="text-slate-400 text-sm max-w-xs mx-auto">
+              <h2 className={`text-xl font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>Welcome to Skipper</h2>
+              <p className={`text-sm max-w-xs mx-auto ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                 Your AI assistant is ready. Start a conversation below.
               </p>
             </div>
@@ -313,10 +315,12 @@ export function ChatPage() {
                     className={`max-w-[80%] rounded-2xl p-3 ${
                       msg.role === 'user'
                         ? 'bg-blue-600 rounded-br-sm'
-                        : 'bg-slate-800 rounded-bl-sm'
+                        : isDark ? 'bg-slate-800 rounded-bl-sm' : 'bg-slate-200 rounded-bl-sm'
                     } ${msg.status === 'error' ? 'opacity-60 border border-red-500' : ''}`}
                   >
-                    <p className="text-sm text-white whitespace-pre-wrap break-words">
+                    <p className={`text-sm whitespace-pre-wrap break-words ${
+                      msg.role === 'user' ? 'text-white' : isDark ? 'text-white' : 'text-slate-900'
+                    }`}>
                       {msg.content}
                     </p>
                     <div className="flex items-center justify-between mt-1 gap-2">
@@ -348,7 +352,7 @@ export function ChatPage() {
         )}
         
         {/* Input area */}
-        <div className="sticky bottom-20 bg-slate-900 pt-2">
+        <div className={`sticky bottom-20 pt-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
           <form onSubmit={handleSendMessage} className="flex gap-2">
             {/* Voice input button */}
             <button
@@ -357,7 +361,9 @@ export function ChatPage() {
               className={`rounded-full w-12 h-12 flex items-center justify-center transition-colors flex-shrink-0 ${
                 isListening
                   ? 'bg-red-500 text-white animate-pulse'
-                  : 'bg-slate-700 hover:bg-slate-600 text-slate-400'
+                  : isDark 
+                    ? 'bg-slate-700 hover:bg-slate-600 text-slate-400'
+                    : 'bg-slate-200 hover:bg-slate-300 text-slate-600'
               }`}
             >
               {isListening ? (
@@ -374,16 +380,20 @@ export function ChatPage() {
               onChange={(e) => setMessage(e.target.value)}
               placeholder={isListening ? "Listening..." : "Message Skipper..."}
               disabled={isSending}
-              className={`flex-1 bg-slate-800 border rounded-full px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-50 ${
-                isListening ? 'border-red-500' : 'border-slate-700'
-              }`}
+              className={`flex-1 border rounded-full px-4 py-3 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-50 ${
+                isDark 
+                  ? 'bg-slate-800 text-white placeholder-slate-500 border-slate-700'
+                  : 'bg-white text-slate-900 placeholder-slate-400 border-slate-300'
+              } ${isListening ? 'border-red-500' : ''}`}
             />
             <button 
               type="submit"
               className={`rounded-full w-12 h-12 flex items-center justify-center transition-colors flex-shrink-0 ${
                 message.trim() && !isSending
                   ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                  : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                  : isDark 
+                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               }`}
               disabled={!message.trim() || isSending}
             >

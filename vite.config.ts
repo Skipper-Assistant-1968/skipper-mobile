@@ -7,8 +7,17 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      workbox: {
+        // Don't cache API calls
+        navigateFallbackDenylist: [/^\/api/],
+        // Force update on any change
+        cleanupOutdatedCaches: true,
+        // Check for updates every hour
+        skipWaiting: true,
+        clientsClaim: true,
+      },
       manifest: {
         name: 'Skipper Mobile',
         short_name: 'Skipper',

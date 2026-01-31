@@ -19,26 +19,26 @@ export function StatusBar() {
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    // Simulated heartbeat check - replace with real gateway connection
+    // Check connection to mobile API server
     const checkHeartbeat = async () => {
       try {
-        // TODO: Replace with actual gateway health check
-        // const start = Date.now()
-        // const res = await fetch('http://localhost:3030/health')
-        // if (res.ok) {
-        //   setStatus({
-        //     connected: true,
-        //     lastPing: new Date(),
-        //     latencyMs: Date.now() - start,
-        //   })
-        // }
-        
-        // Simulated connection for now
-        setStatus({
-          connected: true,
-          lastPing: new Date(),
-          latencyMs: Math.floor(Math.random() * 50) + 10,
+        const start = Date.now()
+        const res = await fetch('http://localhost:3032/api/heartbeat', {
+          signal: AbortSignal.timeout(5000),
         })
+        if (res.ok) {
+          setStatus({
+            connected: true,
+            lastPing: new Date(),
+            latencyMs: Date.now() - start,
+          })
+        } else {
+          setStatus({
+            connected: false,
+            lastPing: null,
+            latencyMs: null,
+          })
+        }
       } catch {
         setStatus({
           connected: false,
@@ -59,13 +59,17 @@ export function StatusBar() {
   return (
     <div className="fixed top-0 left-0 right-0 z-50 pt-safe">
       <motion.div 
-        className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700"
+        className={`backdrop-blur-sm border-b transition-colors ${
+          isDark 
+            ? 'bg-slate-800/95 border-slate-700' 
+            : 'bg-white/95 border-slate-200'
+        }`}
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center justify-between px-4 h-12">
           <div className="flex items-center gap-3">
             <span className="text-xl">⚓</span>
-            <span className="font-semibold text-white dark:text-white light:text-slate-900">Skipper</span>
+            <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Skipper</span>
           </div>
           
           <div className="flex items-center gap-3">
@@ -75,7 +79,9 @@ export function StatusBar() {
                 e.stopPropagation()
                 toggleTheme()
               }}
-              className="p-2 rounded-full hover:bg-slate-700 dark:hover:bg-slate-700 light:hover:bg-slate-200 transition-colors"
+              className={`p-2 rounded-full transition-colors ${
+                isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-200'
+              }`}
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -87,18 +93,10 @@ export function StatusBar() {
             
             {/* Connection status */}
             <div className="flex items-center gap-2">
-              <motion.div
-                className={`w-2 h-2 rounded-full ${statusColor}`}
-                animate={{ 
-                  scale: status.connected ? [1, 1.2, 1] : 1,
-                  opacity: status.connected ? 1 : 0.5 
-                }}
-                transition={{ 
-                  repeat: status.connected ? Infinity : 0, 
-                  duration: 2 
-                }}
+              <div
+                className={`w-2 h-2 rounded-full ${statusColor} ${status.connected ? 'shadow-[0_0_6px_rgba(34,197,94,0.5)]' : ''}`}
               />
-              <span className="text-xs text-slate-400">{statusText}</span>
+              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{statusText}</span>
             </div>
           </div>
         </div>
@@ -111,22 +109,24 @@ export function StatusBar() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden"
             >
-              <div className="px-4 py-3 text-sm text-slate-300 space-y-1 border-t border-slate-700">
+              <div className={`px-4 py-3 text-sm space-y-1 border-t ${
+                isDark ? 'text-slate-300 border-slate-700' : 'text-slate-600 border-slate-200'
+              }`}>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Status:</span>
-                  <span className={status.connected ? 'text-green-400' : 'text-red-400'}>
+                  <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Status:</span>
+                  <span className={status.connected ? 'text-green-500' : 'text-red-500'}>
                     {statusText}
                   </span>
                 </div>
                 {status.latencyMs && (
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Latency:</span>
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Latency:</span>
                     <span>{status.latencyMs}ms</span>
                   </div>
                 )}
                 {status.lastPing && (
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Last ping:</span>
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Last ping:</span>
                     <span>{status.lastPing.toLocaleTimeString()}</span>
                   </div>
                 )}

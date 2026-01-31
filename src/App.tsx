@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { Navigation, StatusBar } from './components'
-import { ChatPage, TasksPage, DigestsPage, AgentsPage, AgentDetailPage, ActivityPage } from './pages'
+import { ChatPage, TasksPage, DigestsPage, HotTopicsPage, AgentsPage, AgentDetailPage, ActivityPage } from './pages'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
 
 function AppContent() {
@@ -19,6 +19,7 @@ function AppContent() {
           <Route path="/" element={<ChatPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/digests" element={<DigestsPage />} />
+          <Route path="/hot-topics" element={<HotTopicsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:sessionKey" element={<AgentDetailPage />} />
           <Route path="/activity" element={<ActivityPage />} />

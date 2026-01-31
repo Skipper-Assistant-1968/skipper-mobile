@@ -57,6 +57,33 @@ export interface ChatHistoryResponse {
   hasMore: boolean
 }
 
+export interface ChannelVideo {
+  channel: string
+  videos: {
+    title: string
+    videoId: string
+    url: string
+  }[]
+}
+
+export interface HotTopic {
+  topic: string
+  synthesis: string
+  keyTakeaway: string
+  executiveBriefing: string
+  channelVideos: ChannelVideo[]
+  heat: 'high' | 'medium' | 'low'
+  videoCount: number
+  date: string
+}
+
+export interface HotTopicsResponse {
+  hotTopics: HotTopic[]
+  count: number
+  daysIncluded: string[]
+  generatedAt: string
+}
+
 class SkipperApi {
   private kanbanUrl: string
   private mobileApiUrl: string
@@ -164,6 +191,14 @@ class SkipperApi {
 
   async getWorkLogs(): Promise<any> {
     return this.request(this.mobileApiUrl, '/api/work-logs')
+  }
+
+  // ================
+  // HOT TOPICS
+  // ================
+
+  async getHotTopics(days = 5): Promise<HotTopicsResponse> {
+    return this.request(this.mobileApiUrl, `/api/hot-topics?days=${days}`)
   }
 }
 

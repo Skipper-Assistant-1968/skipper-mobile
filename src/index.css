@@ -17,10 +17,35 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0f172a;
-  color: white;
   /* Prevent pull-to-refresh on mobile */
   overscroll-behavior-y: contain;
+}
+
+/* Theme colors */
+.dark body, body.dark, .dark {
+  background-color: #0f172a;
+  color: white;
+}
+
+.light body, body.light, .light {
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+/* Default to dark if no theme class */
+:root {
+  background-color: #0f172a;
+  color: white;
+}
+
+html.light {
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+html.dark {
+  background-color: #0f172a;
+  color: white;
 }
 
 /* Safe area insets for notched devices */

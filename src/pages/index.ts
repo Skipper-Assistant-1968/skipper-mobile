@@ -1,6 +1,7 @@
 export { ChatPage } from './ChatPage'
 export { TasksPage } from './TasksPage'
 export { DigestsPage } from './DigestsPage'
+export { HotTopicsPage } from './HotTopicsPage'
 export { AgentsPage } from './AgentsPage'
 export { AgentDetailPage } from './AgentDetailPage'
 export { ActivityPage } from './ActivityPage'

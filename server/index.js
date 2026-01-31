@@ -1130,6 +1130,91 @@ function groupByDate(activities) {
 }
 
 // ===================
+// HOT TOPICS ENDPOINT
+// ===================
+
+/**
+ * GET /api/hot-topics
+ * Returns hot topics from recent YouTube digests (last 5 days)
+ * Topics covered by multiple channels with synthesis and analysis
+ */
+app.get('/api/hot-topics', (req, res) => {
+  const youtubeDir = path.join(DIGESTS_DIR, 'youtube');
+  const daysToLook = parseInt(req.query.days) || 5;
+  
+  try {
+    if (!fs.existsSync(youtubeDir)) {
+      return res.json({
+        hotTopics: [],
+        count: 0,
+        message: 'No YouTube digests directory found'
+      });
+    }
+    
+    // Get available digest files sorted by date (newest first)
+    const files = fs.readdirSync(youtubeDir)
+      .filter(f => f.endsWith('.json') && /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, daysToLook);
+    
+    // Collect hot topics from each day
+    const allHotTopics = [];
+    
+    for (const file of files) {
+      const date = file.replace('.json', '');
+      const filePath = path.join(youtubeDir, file);
+      
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(content);
+        
+        if (data.hotTopics && Array.isArray(data.hotTopics)) {
+          // Add date to each topic and include it
+          data.hotTopics.forEach(topic => {
+            allHotTopics.push({
+              ...topic,
+              date,
+              // Ensure all expected fields exist
+              topic: topic.topic || 'Unknown Topic',
+              synthesis: topic.synthesis || '',
+              keyTakeaway: topic.keyTakeaway || '',
+              executiveBriefing: topic.executiveBriefing || '',
+              channelVideos: topic.channelVideos || [],
+              heat: topic.heat || 'medium',
+              videoCount: topic.videoCount || 0
+            });
+          });
+        }
+      } catch (e) {
+        console.error(`Error reading digest ${date}:`, e.message);
+        continue;
+      }
+    }
+    
+    // Sort by heat level (high > medium > low) and then by video count
+    const heatOrder = { high: 3, medium: 2, low: 1 };
+    allHotTopics.sort((a, b) => {
+      const heatDiff = (heatOrder[b.heat] || 0) - (heatOrder[a.heat] || 0);
+      if (heatDiff !== 0) return heatDiff;
+      return (b.videoCount || 0) - (a.videoCount || 0);
+    });
+    
+    res.json({
+      hotTopics: allHotTopics,
+      count: allHotTopics.length,
+      daysIncluded: files.map(f => f.replace('.json', '')),
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error fetching hot topics:', error.message);
+    res.status(500).json({
+      error: 'Failed to fetch hot topics',
+      message: error.message
+    });
+  }
+});
+
+// ===================
 // DIGEST ENDPOINTS
 // ===================
 
@@ -1478,6 +1563,7 @@ app.use((req, res) => {
       'DELETE /api/chat/pending/:id',
       'DELETE /api/chat/pending',
       'POST /api/chat/respond',
+      'GET /api/hot-topics',
       'GET /api/digests/youtube',
       'GET /api/digests/youtube/:date'
     ]
@@ -1511,6 +1597,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /api/chat/pending    - Pending messages for Skipper`);
   console.log(`   DELETE /api/chat/pending  - Clear pending messages`);
   console.log(`   POST /api/chat/respond    - Skipper sends response`);
+  console.log(`   GET  /api/hot-topics      - Hot topics from recent digests`);
   console.log(`📡 WebSocket Events:`);
   console.log(`   chat:message    - Client sends message`);
   console.log(`   chat:response   - Skipper sends response`);
