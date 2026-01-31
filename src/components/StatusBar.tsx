@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sun, Moon, Settings } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
+import { api } from '../lib/api'
 
 interface HeartbeatStatus {
   connected: boolean
@@ -21,26 +22,16 @@ export function StatusBar() {
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    // Check connection to mobile API server
+    // Check connection to mobile API server using the API client
     const checkHeartbeat = async () => {
       try {
         const start = Date.now()
-        const res = await fetch('http://localhost:3032/api/heartbeat', {
-          signal: AbortSignal.timeout(5000),
+        await api.getHeartbeat()
+        setStatus({
+          connected: true,
+          lastPing: new Date(),
+          latencyMs: Date.now() - start,
         })
-        if (res.ok) {
-          setStatus({
-            connected: true,
-            lastPing: new Date(),
-            latencyMs: Date.now() - start,
-          })
-        } else {
-          setStatus({
-            connected: false,
-            lastPing: null,
-            latencyMs: null,
-          })
-        }
       } catch {
         setStatus({
           connected: false,

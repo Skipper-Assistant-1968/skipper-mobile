@@ -18,7 +18,7 @@ const getBaseUrl = (port: number): string => {
 }
 
 const KANBAN_URL = getBaseUrl(3030)
-const MOBILE_API_URL = getBaseUrl(3031)
+const MOBILE_API_URL = getBaseUrl(3032)
 
 export interface ApiError {
   status: number
