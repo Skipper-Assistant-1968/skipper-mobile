@@ -18,7 +18,9 @@ const getBaseUrl = (port: number): string => {
 }
 
 const KANBAN_URL = getBaseUrl(3030)
-const MOBILE_API_URL = getBaseUrl(3032)
+// Tailscale port mapping: external 3031 → internal 3032
+// Frontend must use the EXTERNAL port since it runs in the browser
+const MOBILE_API_URL = getBaseUrl(3031)
 
 export interface ApiError {
   status: number
