@@ -1746,6 +1746,160 @@ app.get('/api/agents/:sessionKey/transcript', (req, res) => {
 });
 
 // ===================
+// REVENUE IDEAS ENDPOINTS
+// ===================
+
+const REVENUE_IDEAS_DIR = path.join(MEMORY_DIR, 'revenue-ideas');
+const REVENUE_IDEAS_FILE = path.join(REVENUE_IDEAS_DIR, 'ideas.json');
+
+/**
+ * Load ideas from ideas.json
+ */
+function loadRevenueIdeas() {
+  try {
+    if (!fs.existsSync(REVENUE_IDEAS_FILE)) {
+      return { ideas: [], lastUpdated: null, version: 1 };
+    }
+    const content = fs.readFileSync(REVENUE_IDEAS_FILE, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    console.error('Error loading revenue ideas:', error.message);
+    return { ideas: [], lastUpdated: null, version: 1 };
+  }
+}
+
+/**
+ * Save ideas to ideas.json
+ */
+function saveRevenueIdeas(data) {
+  try {
+    if (!fs.existsSync(REVENUE_IDEAS_DIR)) {
+      fs.mkdirSync(REVENUE_IDEAS_DIR, { recursive: true });
+    }
+    data.lastUpdated = new Date().toISOString();
+    fs.writeFileSync(REVENUE_IDEAS_FILE, JSON.stringify(data, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error saving revenue ideas:', error.message);
+    return false;
+  }
+}
+
+/**
+ * GET /api/revenue-ideas
+ * Returns all revenue ideas with metadata
+ */
+app.get('/api/revenue-ideas', (req, res) => {
+  const data = loadRevenueIdeas();
+  
+  // Optional status filter
+  const statusFilter = req.query.status;
+  let ideas = data.ideas || [];
+  
+  if (statusFilter) {
+    ideas = ideas.filter(idea => idea.status === statusFilter);
+  }
+  
+  res.json({
+    ideas,
+    count: ideas.length,
+    totalCount: (data.ideas || []).length,
+    lastUpdated: data.lastUpdated,
+    version: data.version
+  });
+});
+
+/**
+ * GET /api/revenue-ideas/:id
+ * Returns a specific revenue idea
+ */
+app.get('/api/revenue-ideas/:id', (req, res) => {
+  const { id } = req.params;
+  const data = loadRevenueIdeas();
+  
+  const idea = data.ideas.find(i => i.id === id);
+  
+  if (!idea) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: `Idea with id "${id}" not found`
+    });
+  }
+  
+  res.json(idea);
+});
+
+/**
+ * PATCH /api/revenue-ideas/:id
+ * Update a revenue idea (status, notes, etc.)
+ */
+app.patch('/api/revenue-ideas/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  
+  // Validate allowed fields
+  const allowedFields = ['status', 'notes', 'confidence'];
+  const filteredUpdates = {};
+  
+  for (const [key, value] of Object.entries(updates)) {
+    if (allowedFields.includes(key)) {
+      filteredUpdates[key] = value;
+    }
+  }
+  
+  // Validate status if provided
+  const validStatuses = ['new', 'considering', 'on-hold', 'ruled-out', 'in-progress', 'launched'];
+  if (filteredUpdates.status && !validStatuses.includes(filteredUpdates.status)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+    });
+  }
+  
+  // Validate confidence if provided
+  const validConfidence = ['high', 'medium', 'low'];
+  if (filteredUpdates.confidence && !validConfidence.includes(filteredUpdates.confidence)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: `Invalid confidence. Must be one of: ${validConfidence.join(', ')}`
+    });
+  }
+  
+  const data = loadRevenueIdeas();
+  const ideaIndex = data.ideas.findIndex(i => i.id === id);
+  
+  if (ideaIndex === -1) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: `Idea with id "${id}" not found`
+    });
+  }
+  
+  // Apply updates
+  const today = new Date().toISOString().split('T')[0];
+  data.ideas[ideaIndex] = {
+    ...data.ideas[ideaIndex],
+    ...filteredUpdates,
+    dateUpdated: today
+  };
+  
+  // Save
+  if (!saveRevenueIdeas(data)) {
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to save changes'
+    });
+  }
+  
+  console.log(`💡 Updated idea "${id}": ${JSON.stringify(filteredUpdates)}`);
+  
+  res.json({
+    success: true,
+    idea: data.ideas[ideaIndex]
+  });
+});
+
+// ===================
 // ERROR HANDLING
 // ===================
 
@@ -1768,7 +1922,10 @@ app.use((req, res) => {
       'POST /api/chat/respond',
       'GET /api/hot-topics',
       'GET /api/digests/youtube',
-      'GET /api/digests/youtube/:date'
+      'GET /api/digests/youtube/:date',
+      'GET /api/revenue-ideas',
+      'GET /api/revenue-ideas/:id',
+      'PATCH /api/revenue-ideas/:id'
     ]
   });
 });
@@ -1801,6 +1958,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   DELETE /api/chat/pending  - Clear pending messages`);
   console.log(`   POST /api/chat/respond    - Skipper sends response`);
   console.log(`   GET  /api/hot-topics      - Hot topics from recent digests`);
+  console.log(`   GET  /api/revenue-ideas   - List all revenue ideas`);
+  console.log(`   PATCH /api/revenue-ideas/:id - Update idea status/notes`);
   console.log(`📡 WebSocket Events:`);
   console.log(`   chat:message    - Client sends message`);
   console.log(`   chat:response   - Skipper sends response`);

@@ -13,7 +13,7 @@ const navItems: NavItem[] = [
   { path: '/tasks', label: 'Tasks', icon: '✅' },
   { path: '/hot-topics', label: 'Hot', icon: '🔥' },
   { path: '/learn', label: 'Learn', icon: '📚' },
-  { path: '/agents', label: 'Agents', icon: '🤖' },
+  { path: '/ideas', label: 'Ideas', icon: '💡' },
 ]
 
 export function Navigation() {
