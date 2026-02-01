@@ -382,6 +382,20 @@ function countAgents(status) {
 // ===================
 
 /**
+ * GET /health
+ * Simple health check endpoint for monitoring
+ */
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'skipper-mobile-api',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor((Date.now() - SERVER_START) / 1000),
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
+
+/**
  * GET /api/heartbeat
  * Returns alive status, timestamp, current state, agent count
  */
