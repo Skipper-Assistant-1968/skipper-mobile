@@ -11,8 +11,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { path: '/', label: 'Chat', icon: '💬' },
   { path: '/tasks', label: 'Tasks', icon: '✅' },
-  { path: '/digests', label: 'Digests', icon: '📰' },
   { path: '/hot-topics', label: 'Hot', icon: '🔥' },
+  { path: '/learn', label: 'Learn', icon: '📚' },
   { path: '/agents', label: 'Agents', icon: '🤖' },
 ]
 

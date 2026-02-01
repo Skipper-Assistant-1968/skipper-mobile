@@ -1215,6 +1215,195 @@ app.get('/api/hot-topics', (req, res) => {
 });
 
 // ===================
+// RESEARCH/LEARNING ENDPOINTS
+// ===================
+
+const RESEARCH_DIR = path.join(MEMORY_DIR, 'research');
+
+/**
+ * GET /api/learn
+ * Returns curated learning content from research files
+ * Parses markdown files and extracts key sections for mobile display
+ */
+app.get('/api/learn', (req, res) => {
+  const daysToLook = parseInt(req.query.days) || 7;
+  
+  try {
+    if (!fs.existsSync(RESEARCH_DIR)) {
+      return res.json({
+        content: [],
+        count: 0,
+        message: 'No research directory found'
+      });
+    }
+    
+    // Get recent research files
+    const files = fs.readdirSync(RESEARCH_DIR)
+      .filter(f => f.endsWith('.md') && /^\d{4}-\d{2}-\d{2}/.test(f))
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 20); // Last 20 files
+    
+    const content = [];
+    
+    for (const file of files) {
+      const filePath = path.join(RESEARCH_DIR, file);
+      
+      try {
+        const markdown = fs.readFileSync(filePath, 'utf-8');
+        const lines = markdown.split('\n');
+        
+        // Extract title from first H1
+        const titleMatch = lines.find(l => l.startsWith('# '));
+        const title = titleMatch ? titleMatch.replace('# ', '').trim() : file.replace('.md', '');
+        
+        // Extract date from filename
+        const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+        const date = dateMatch ? dateMatch[1] : null;
+        
+        // Extract topic from filename (after date)
+        const topicMatch = file.match(/^\d{4}-\d{2}-\d{2}-(.+)\.md$/);
+        const topic = topicMatch ? topicMatch[1].replace(/-/g, ' ') : 'Research';
+        
+        // Extract executive summary if present
+        let summary = '';
+        let inSummary = false;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.toLowerCase().includes('executive summary') || line.toLowerCase().includes('## summary')) {
+            inSummary = true;
+            continue;
+          }
+          if (inSummary) {
+            if (line.startsWith('## ') || line.startsWith('# ')) {
+              break;
+            }
+            if (line.trim() && !line.startsWith('**')) {
+              summary += line.trim() + ' ';
+            }
+          }
+        }
+        
+        // If no summary section, use first paragraph after title
+        if (!summary) {
+          let foundTitle = false;
+          for (const line of lines) {
+            if (line.startsWith('# ')) {
+              foundTitle = true;
+              continue;
+            }
+            if (foundTitle && line.trim() && !line.startsWith('#') && !line.startsWith('*') && !line.startsWith('-') && !line.startsWith('|')) {
+              summary = line.trim();
+              break;
+            }
+          }
+        }
+        
+        // Truncate summary
+        summary = summary.slice(0, 300).trim();
+        if (summary.length >= 300) summary += '...';
+        
+        // Extract key takeaways (bullet points after "Key Takeaways" or "Top" sections)
+        const takeaways = [];
+        let inTakeaways = false;
+        for (const line of lines) {
+          if (line.toLowerCase().includes('key takeaway') || 
+              line.toLowerCase().includes('top 5') ||
+              line.toLowerCase().includes('actionable')) {
+            inTakeaways = true;
+            continue;
+          }
+          if (inTakeaways) {
+            if (line.startsWith('## ') || line.startsWith('# ')) {
+              break;
+            }
+            // Match patterns like "1. **Bold text**" or "- **Bold text**"
+            if (line.match(/^[\d]+\.\s+\*\*.+\*\*/) || line.match(/^[\-\*]\s+\*\*.+\*\*/)) {
+              // Extract just the bold portion as the takeaway
+              const boldMatch = line.match(/\*\*([^*]+)\*\*/);
+              if (boldMatch) {
+                const cleanTakeaway = boldMatch[1].trim();
+                if (cleanTakeaway) takeaways.push(cleanTakeaway.slice(0, 150));
+              }
+            }
+          }
+        }
+        
+        // Extract YouTube video links
+        const videos = [];
+        const videoRegex = /\[([^\]]+)\]\((https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)[^\)]+)\)/g;
+        let match;
+        while ((match = videoRegex.exec(markdown)) !== null) {
+          videos.push({
+            title: match[1].slice(0, 100),
+            url: match[2]
+          });
+        }
+        
+        // Also check for video IDs mentioned in text
+        const videoIdRegex = /\(([a-zA-Z0-9_-]{11})\)/g;
+        while ((match = videoIdRegex.exec(markdown)) !== null) {
+          const existingByUrl = videos.find(v => v.url.includes(match[1]));
+          if (!existingByUrl) {
+            videos.push({
+              title: 'Video',
+              url: `https://youtube.com/watch?v=${match[1]}`
+            });
+          }
+        }
+        
+        // Determine category based on keywords
+        const lowerContent = markdown.toLowerCase();
+        let category = 'Research';
+        if (lowerContent.includes('clawdbot') || lowerContent.includes('claude') || lowerContent.includes('anthropic')) {
+          category = 'AI Tools';
+        } else if (lowerContent.includes('game') || lowerContent.includes('dnd') || lowerContent.includes('minecraft')) {
+          category = 'Gaming & AI';
+        } else if (lowerContent.includes('voice') || lowerContent.includes('audio') || lowerContent.includes('tts')) {
+          category = 'Voice Tech';
+        } else if (lowerContent.includes('database') || lowerContent.includes('vector') || lowerContent.includes('embedding')) {
+          category = 'Data & Infrastructure';
+        }
+        
+        content.push({
+          id: file.replace('.md', ''),
+          title,
+          topic,
+          date,
+          category,
+          summary: summary || 'Research findings and analysis.',
+          takeaways: takeaways.slice(0, 5),
+          videos: videos.slice(0, 5),
+          filename: file
+        });
+      } catch (e) {
+        console.error(`Error parsing research file ${file}:`, e.message);
+        continue;
+      }
+    }
+    
+    // Filter to recent days
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToLook);
+    const cutoffStr = cutoffDate.toISOString().split('T')[0];
+    
+    const recentContent = content.filter(c => c.date && c.date >= cutoffStr);
+    
+    res.json({
+      content: recentContent,
+      count: recentContent.length,
+      totalAvailable: content.length,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error fetching learning content:', error.message);
+    res.status(500).json({
+      error: 'Failed to fetch learning content',
+      message: error.message
+    });
+  }
+});
+
+// ===================
 // DIGEST ENDPOINTS
 // ===================
 

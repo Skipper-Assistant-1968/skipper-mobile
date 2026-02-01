@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { motion, AnimatePresence, PanInfo } from 'framer-motion'
 import { PageContainer } from '../components/PageContainer'
 import { CreateTaskModal } from '../components/CreateTaskModal'
 import api, { Task } from '../lib/api'
+import { ChevronDown, Check } from 'lucide-react'
 
 // Column configuration
 const COLUMNS = [
@@ -49,14 +50,97 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diffDays / 30)}mo ago`
 }
 
+// Column Selector Dropdown Component
+function ColumnSelector({ 
+  currentColumn, 
+  onColumnChange,
+  isUpdating 
+}: { 
+  currentColumn: string
+  onColumnChange: (newColumn: string) => void
+  isUpdating: boolean
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const current = COLUMNS.find(c => c.id === currentColumn)
+  
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsOpen(!isOpen)
+        }}
+        disabled={isUpdating}
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+          isUpdating 
+            ? 'bg-slate-700 text-slate-400 cursor-wait' 
+            : 'bg-slate-700 hover:bg-slate-600 text-white active:scale-95'
+        }`}
+      >
+        <span className={`w-2 h-2 rounded-full ${current?.color || 'bg-slate-500'}`} />
+        <span>Move to: {current?.label || 'Select'}</span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {/* Dropdown menu */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="absolute left-0 right-0 mt-2 bg-slate-700 rounded-lg border border-slate-600 shadow-xl z-50 overflow-hidden"
+          >
+            {COLUMNS.map((col) => (
+              <button
+                key={col.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (col.id !== currentColumn) {
+                    onColumnChange(col.id)
+                  }
+                  setIsOpen(false)
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm transition-colors ${
+                  col.id === currentColumn
+                    ? 'bg-slate-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-600 hover:text-white'
+                }`}
+              >
+                <span className={`w-3 h-3 rounded-full ${col.color}`} />
+                <span className="flex-1">{col.label}</span>
+                {col.id === currentColumn && (
+                  <Check className="w-4 h-4 text-green-400" />
+                )}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Click outside to close */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={(e) => {
+            e.stopPropagation()
+            setIsOpen(false)
+          }} 
+        />
+      )}
+    </div>
+  )
+}
+
 // Task Card Component
-function TaskCard({ task, isExpanded, onToggle }: { 
+function TaskCard({ task, isExpanded, onToggle, onColumnChange, isUpdating }: { 
   task: Task
   isExpanded: boolean
-  onToggle: () => void 
+  onToggle: () => void
+  onColumnChange: (taskId: string, newColumn: string) => void
+  isUpdating: boolean
 }) {
   const priority = inferPriority(task)
-  const column = COLUMNS.find(c => c.id === task.column)
   
   return (
     <motion.div
@@ -101,7 +185,7 @@ function TaskCard({ task, isExpanded, onToggle }: {
       
       {/* Expanded details */}
       <AnimatePresence>
-        {isExpanded && task.description && (
+        {isExpanded && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -109,14 +193,22 @@ function TaskCard({ task, isExpanded, onToggle }: {
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 pt-0 border-t border-slate-700">
-              <p className="text-slate-300 text-sm mt-3 whitespace-pre-wrap">
-                {task.description}
-              </p>
+              {task.description && (
+                <p className="text-slate-300 text-sm mt-3 whitespace-pre-wrap">
+                  {task.description}
+                </p>
+              )}
+              
+              {/* Move to column dropdown - prominent for mobile */}
+              <div className="mt-4">
+                <ColumnSelector
+                  currentColumn={task.column}
+                  onColumnChange={(newColumn) => onColumnChange(task.id, newColumn)}
+                  isUpdating={isUpdating}
+                />
+              </div>
+              
               <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
-                <span className={`px-2 py-0.5 rounded ${column?.color} text-white`}>
-                  {column?.label}
-                </span>
-                <span>•</span>
                 <span>{priority} priority</span>
               </div>
             </div>
@@ -161,6 +253,7 @@ export function TasksPage() {
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [pullDistance, setPullDistance] = useState(0)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   
@@ -170,6 +263,26 @@ export function TasksPage() {
     queryFn: () => api.getTasks(),
     staleTime: 30000, // 30 seconds
   })
+  
+  // Mutation for updating task column
+  const updateTaskMutation = useMutation({
+    mutationFn: ({ taskId, column }: { taskId: string; column: string }) => 
+      api.updateTask(taskId, { column }),
+    onMutate: ({ taskId }) => {
+      setUpdatingTaskId(taskId)
+    },
+    onSuccess: () => {
+      // Refetch tasks to get updated data
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onSettled: () => {
+      setUpdatingTaskId(null)
+    },
+  })
+  
+  const handleColumnChange = (taskId: string, newColumn: string) => {
+    updateTaskMutation.mutate({ taskId, column: newColumn })
+  }
   
   const handleTaskCreated = () => {
     // Invalidate and refetch tasks
@@ -283,6 +396,8 @@ export function TasksPage() {
                   onToggle={() => setExpandedTask(
                     expandedTask === task.id ? null : task.id
                   )}
+                  onColumnChange={handleColumnChange}
+                  isUpdating={updatingTaskId === task.id}
                 />
               ))
             )}
