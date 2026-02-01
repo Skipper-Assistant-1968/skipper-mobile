@@ -1,11 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PageContainer } from '../components/PageContainer'
 import { useTheme } from '../context/ThemeContext'
-import { Trash2, RefreshCw, Moon, Sun, Info, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
+import { Trash2, RefreshCw, Moon, Sun, Info, AlertCircle, CheckCircle, Loader2, Sparkles } from 'lucide-react'
 
-// App version - update this when releasing new versions
-const APP_VERSION = '0.1.0'
-const BUILD_DATE = new Date().toISOString().split('T')[0]
+// Get build info from global (injected at build time via Vite define)
+const getBuildInfo = () => {
+  if (typeof window !== 'undefined' && window.__SKIPPER_BUILD__) {
+    return window.__SKIPPER_BUILD__
+  }
+  return { version: '0.1.0', buildId: 'dev', timestamp: new Date().toISOString() }
+}
 
 interface CacheInfo {
   name: string
@@ -17,6 +21,20 @@ export function SettingsPage() {
   const [clearing, setClearing] = useState(false)
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null)
   const [cacheInfo, setCacheInfo] = useState<CacheInfo[] | null>(null)
+  const [justUpdated, setJustUpdated] = useState(false)
+  
+  const buildInfo = getBuildInfo()
+  
+  // Check if we just updated
+  useEffect(() => {
+    const updated = sessionStorage.getItem('skipper-just-updated')
+    if (updated) {
+      setJustUpdated(true)
+      sessionStorage.removeItem('skipper-just-updated')
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => setJustUpdated(false), 5000)
+    }
+  }, [])
 
   // Get info about current caches
   const inspectCaches = async () => {
@@ -103,8 +121,23 @@ export function SettingsPage() {
         const registration = await navigator.serviceWorker.getRegistration()
         
         if (registration) {
+          // Force update check
           await registration.update()
-          setStatus({ type: 'success', message: 'Update check complete. Reload if prompted.' })
+          
+          // Check if there's a waiting worker (new version ready)
+          if (registration.waiting) {
+            setStatus({ type: 'success', message: 'New version found! Activating...' })
+            // Tell the waiting SW to take over
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' })
+            // Mark that we're updating
+            sessionStorage.setItem('skipper-just-updated', 'true')
+            // Reload to get new version
+            setTimeout(() => window.location.reload(), 500)
+          } else if (registration.installing) {
+            setStatus({ type: 'info', message: 'Update installing... Please wait.' })
+          } else {
+            setStatus({ type: 'success', message: `You're on the latest version (${buildInfo.buildId})` })
+          }
         } else {
           setStatus({ type: 'info', message: 'No service worker registered' })
         }
@@ -121,6 +154,17 @@ export function SettingsPage() {
     <PageContainer title="Settings">
       <div className="space-y-6">
         
+        {/* Just Updated Banner */}
+        {justUpdated && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/20 border border-emerald-500/30">
+            <Sparkles className="w-5 h-5 text-emerald-400" />
+            <div>
+              <div className="text-emerald-400 font-medium">App Updated!</div>
+              <div className="text-emerald-400/70 text-sm">You're now running the latest version</div>
+            </div>
+          </div>
+        )}
+
         {/* App Info Section */}
         <section className={`rounded-xl border p-4 ${
           isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
@@ -136,13 +180,19 @@ export function SettingsPage() {
             <div className="flex justify-between">
               <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Version</span>
               <span className={`font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {APP_VERSION}
+                {buildInfo.version}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Build Date</span>
-              <span className={`font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {BUILD_DATE}
+              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Build ID</span>
+              <span className={`font-mono text-xs ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {buildInfo.buildId}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Built</span>
+              <span className={`font-mono text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                {new Date(buildInfo.timestamp).toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between">
